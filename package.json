@@ -1,5 +1,5 @@
 {
-  "name": "nodejs_controller",
+  "name": "react-mqtt-controller",
   "version": "0.1.0",
   "private": true,
   "dependencies": {
