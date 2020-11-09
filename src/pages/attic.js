@@ -1,11 +1,10 @@
-import React from 'react'
+import React, { Component } from 'react'
 import './attic.css'
 
 var lightBulbicon = [ "https://image.flaticon.com/icons/svg/1527/1527680.svg", "https://image.flaticon.com/icons/svg/1527/1527681.svg"];
 var tempIcon =["https://image.flaticon.com/icons/svg/1113/1113742.svg"];
 var humIcon=["https://image.flaticon.com/icons/svg/1779/1779883.svg"];
 
-var atticState = [false, false, false, 0.00, 0.00];
 var topicsSub = ['attic/light1/status', 'attic/light2/status', 'attic/light3/status', 'attic/sensors'];
 var topicsPub = ['attic/light1', 'attic/light2', 'attic/light3'];
 
@@ -25,109 +24,128 @@ var options = {
 }
 
 var client= mqtt.connect(broker, options);
+console.log("Requesting connection to " + broker);
 
-console.log("mqtt connecting...");
 
-client.on('connect', function ()
-{   
-    for(var i in topicsSub){
-        client.subscribe(topicsSub[i]);
-        console.log("subscribed to: " + topicsSub[i])
+/////////////////////////////////////////////////////////////////////////////
+
+export default class Attic extends Component{
+    constructor(props){
+        super(props);
+        this.state={
+            light1: {value: false, topicIndex: 0, text: "Light 1"},
+            light2: {value: false, topicIndex: 1, text: "Light 2"},
+            light3: {value: false, topicIndex: 2, text: "Light 3"},
+            temp:   {value: '--,-',  topicIndex: 3, text: "Temperature"},
+            hum:    {value: '--,-',  topicIndex: 3, text: "humidity"},
+            rgb:    {value: {"red": 0, "green": 0, "blue": 0}, topicIndex: 4, text: "rgb"}
+        }
     }
-    
-});
 
-client.on('message', function (receivedTopic, message)
-{  
-    //console.log("topic: "+ receivedTopic.toString() + " received: "+ message.toString());
-    var err = false;
-    var switches = [ document.getElementById("switch1"), document.getElementById("switch2"), document.getElementById("switch3")];
-    var sensorLabels = [document.getElementById("temp-value"), document.getElementById("hum-value")];
-    var icons = [ document.getElementById("light1-icon"), document.getElementById("light2-icon"), document.getElementById("light3-icon"), ]
-    
-    var statusIndex = topicsSub.indexOf(receivedTopic.toString())
-    
-    if(statusIndex >= 0 && statusIndex <=2){
-        atticState[statusIndex] = (message == 'on')? true : false;
-        switches[statusIndex].checked = atticState[statusIndex];
-        icons[statusIndex].src = lightBulbicon[(atticState[statusIndex] ? 1 : 0)];
-    }
-    else if(statusIndex > 2){
-        var sensors = JSON.parse(message)
+    switchChanged = (switchName) => {
+        if(!this.state.hasOwnProperty(switchName)) return false;
 
-        atticState[statusIndex] = sensors.Temperature;
-        atticState[statusIndex+1] = sensors.Humidity;
+        let switchVal = this.state[switchName].value;
+        let index = this.state[switchName].topicIndex;
+
+        client.publish(topicsPub[index], (switchVal ? 'off': 'on'));
         
-        console.log(sensorLabels);
-        sensorLabels[0].innerHTML = atticState[statusIndex].toString() + "°";
-        sensorLabels[1].innerHTML = atticState[statusIndex+1].toString() + "%";
+        let content = this.state[switchName];
+        content.value = !content.value;
 
+        this.setState({[switchName]: content});
     }
-    else{
-        err = true;
-        console.log("receved: " + message.toString() + " from: " + receivedTopic.toString() + " but hot handled...");
+
+    handleConnection = () =>{
+        topicsSub.forEach(topic=>{
+            client.subscribe(topic);
+            console.log("subscribed to: " + topic)
+        })
     }
-    if(!err){
-        console.log(atticState)
+
+    handleMessage = (receivedTopic, message) =>{
+        //console.log("topic: "+ receivedTopic.toString() + " received: "+ message.toString());
+        const topicHandler={
+            'attic/light1/status':(message)=>{
+                let state = (message == 'on') ? true : false;
+                let content = this.state['light1'];
+                content.value = state;
+
+                this.setState({light1: content});
+            },
+            'attic/light2/status':(message)=>{
+                let state = (message == 'on')? true : false;
+                let content = this.state['light2'];
+                content.value = state;
+
+                this.setState({light2: content});
+            },
+            'attic/light3/status':(message)=>{
+                let state = (message == 'on')? true : false;
+                let content = this.state['light3'];
+                content.value = state;
+
+                this.setState({light3: content});
+            },
+            'attic/sensors':(message)=>{
+                let values = JSON.parse(message);
+
+                let humContent = this.state.hum;
+                let tempContent =this.state.temp;
+
+                humContent.value = parseFloat(values.Humidity);
+                tempContent.value = parseFloat(values.Temperature);
+
+                this.setState({
+                    hum:humContent,
+                    temp: tempContent
+                })
+            }
+        }
+
+        const handler = topicHandler[receivedTopic];
+        if(handler){
+            handler(message);
+            console.log(this.state);
+        }
     }
-    
-});
 
-//////////////////////////////////////////////////////////////////////////////
+    componentDidMount(){
+        client.on('connect', ()=>{this.handleConnection()});
+        client.on('message', (receivedTopic, message)=>{this.handleMessage(receivedTopic, message)});
+    }
 
-function switchChanged(switchNum){
-    var switches = [ document.getElementById("switch1"), document.getElementById("switch2"), document.getElementById("switch3")];
-    var icons = [ document.getElementById("light1-icon"), document.getElementById("light2-icon"), document.getElementById("light3-icon"), ]
-    var index = switchNum-1;
-
-    atticState[index] = !atticState[index];
-    switches[index].checked = atticState[index]
-
-    client.publish(topicsPub[index], (atticState[index] ? 'on': 'off'));
-    icons[index].src = lightBulbicon[(atticState[index] ? 1 : 0)];
-    
-}
-
-export default function Attic(){
-    
-    return(
-        <div className = "main-container">
-            
-            <div className = "devices-container">
+    createSwitch = (switchName) =>{
+        return(
+            <div className = "device">
+                <label className="device-label">
+                    <img 
+                        src={this.state[switchName].value?lightBulbicon[1]:lightBulbicon[0]} 
+                        className = "device-icon" 
+                        id="light1-icon" 
+                    />
+                    <strong className = "device-text">{this.state[switchName].text}</strong>
+                </label>
                 
-                <div className = "device">
-                    <label className="device-label">
-                        <img src={lightBulbicon[0]} className = "device-icon" id="light1-icon" />
-                        <strong className = "device-text">Light 1 </strong>
-                    </label>
+                <label className="switch" >
+                    <input 
+                        type="checkbox" 
+                        id="switch1" 
+                        checked={this.state[switchName].value}
+                        onClick={() => {this.switchChanged(switchName)}}/>
+                    <span className="slider round"></span>
+                </label>
+            </div> 
+        )
+    }
+
+    createDevices = () =>{
+        return(
+            <div className = "devices-container">
                     
-                    <label className="switch" >
-                        <input type="checkbox" id="switch1" onClick={() => {switchChanged(1)}}/>
-                        <span className="slider round"></span>
-                    </label>
-                </div> 
-
-                <div className = "device">
-                    <label className="device-label">
-                        <img src={lightBulbicon[0]} className = "device-icon" id="light2-icon" />
-                        <strong className = "device-text">Light 2 </strong>
-                    </label>
-                    <label className="switch" >
-                        <input type="checkbox" id="switch2" onClick={() => {switchChanged(2)}}/>
-                        <span className="slider round"></span>
-                    </label>
-                </div>
-
-                <div className = "device">
-                    <label className="device-label">
-                        <img src={lightBulbicon[0]} className = "device-icon" id="light3-icon" />
-                        <strong className = "device-text">Light 3 </strong>
-                    </label>
-                    <label className="switch" >
-                        <input type="checkbox" id="switch3" onClick={() => {switchChanged(3)}}/>
-                        <span className="slider round"></span>
-                    </label>
-                </div>
+                {this.createSwitch('light1')}
+                {this.createSwitch('light2')}
+                {this.createSwitch('light3')}
 
                 <div className = "device">
                     <label className="device-label">
@@ -135,7 +153,7 @@ export default function Attic(){
                         <strong className = "device-text">Temperature </strong>
                     </label>
                     <label className="temp-label" id="temp-value" >
-                        --.-°
+                        {this.state.temp.value.toString() + "°C"}
                     </label>
                 </div>
                 
@@ -146,15 +164,19 @@ export default function Attic(){
                         <strong className = "device-text">Humidity </strong>
                     </label>
                     <label className="hum-label" id="hum-value" >
-                    --.-%
+                        {this.state.hum.value.toString() + "%"}
                     </label>
                 </div>
                 
-
-
             </div>
+        )
+    }
 
-        </div>
-
-    );
+    render(){
+        return(
+            <div className = "main-container">       
+                {this.createDevices()}
+            </div>
+        );
+    }
 }
